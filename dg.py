@@ -1,8 +1,22 @@
 import numpy as np
 from sympy import *
 
+_global_simplify_option = True
+
+
+def setSimplify(tf: bool):
+    """
+    If this program is too slow, probably it is problem of simplify.
+    Disable it will not cause big issue.
+    """
+    global _global_simplify_option
+    _global_simplify_option = tf
+
 
 def sqrSimplify(expr):
+    if not _global_simplify_option:
+        return expr
+
     def _sqr_simplify(expr):
         expr = simplify(expr)
         p, rep = posify(simplify(expr * expr))
@@ -15,7 +29,9 @@ def sqrSimplify(expr):
 
 
 def normalize(vec):
-    return simplify(vec / norm(vec))
+    if not _global_simplify_option:
+        return vec / norm(vec)
+    return simplify(simplify(vec) / norm(vec))
 
 
 def norm(vec):

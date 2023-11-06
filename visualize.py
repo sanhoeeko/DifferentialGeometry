@@ -11,15 +11,31 @@ def arange(start, end, step):
     return np.arange(start, end + step, step)
 
 
-def pvPlotTube(points):
+def safe_vstack(lst: list):
+    shape = None
+    for obj in lst:
+        if hasattr(obj, 'shape'):
+            shape = obj.shape
+            break
+    for i in range(len(lst)):
+        if not hasattr(lst[i], 'shape'):
+            lst[i] = np.ones(shape) * lst[i]
+    return np.vstack(lst)
+
+
+def pvPlotTube(points, plotter=None):
     spline = pv.Spline(points, 1000)
-    spline.plot(
+    if plotter is None:
+        plotter = pv.Plotter()
+    plotter.add_mesh(
+        spline,
         render_lines_as_tubes=True,
         line_width=10,
     )
+    return plotter
 
 
-def _plotCurve(xfunc, yfunc, zfunc, t_range, eps):
+def _plotCurve(xfunc, yfunc, zfunc, t_range, eps, plotter=None):
     """
     :param xfunc, yfunc, zfunc: Callable for vector
     :param t_range: list, like [t_start, t_end]
@@ -28,8 +44,9 @@ def _plotCurve(xfunc, yfunc, zfunc, t_range, eps):
     xs = xfunc(ts)
     ys = yfunc(ts)
     zs = zfunc(ts)
-    points = np.vstack((xs, ys, zs)).T
-    pvPlotTube(points)
+    points = safe_vstack([xs, ys, zs]).T
+    plotter = pvPlotTube(points, plotter)
+    return plotter
 
 
 def _plotSurface(xfunc, yfunc, zfunc, u_range, v_range, eps, plotter=None):
@@ -76,22 +93,56 @@ def _plotSurfaceColorfully(xfunc, yfunc, zfunc, color_func, u_range, v_range, ep
     return plotter
 
 
-def plotCurve(curve: dg.Curve, t_range=(-1, 1), eps=None, params: dict = None):
+def plotRawCurve(x: dg.Matrix, t, t_range=(-1, 1), eps=None, params: dict = None, plotter=None):
     if eps is None:
         eps = (t_range[1] - t_range[0]) / 100
     # substitute parameters
-    lst = list(curve.x)
+    lst = list(x)
     if params is not None:
         for k in params.keys():
             for i in range(len(lst)):
                 lst[i] = lst[i].subs(k, params[k])
     # convert expressions to callables
-    xf, yf, zf = [lambdify(curve.t, f) for f in lst]
+    xf, yf, zf = [lambdify(t, f) for f in lst]
     # draw
     try:
-        _plotCurve(xf, yf, zf, t_range, eps)
+        plotter = _plotCurve(xf, yf, zf, t_range, eps, plotter=plotter)
     except TypeError:
         print("plotCurve Error: You may forget to eliminate all free parameters in your expression.")
+    return plotter
+
+
+def plotCurve(curve: dg.Curve, t_range=(-1, 1), eps=None, params: dict = None, plotter=None):
+    return plotRawCurve(curve.x, curve.t, t_range, eps, params, plotter)
+
+
+def _plotSegment(p1, p2, plotter):
+    plotter.add_lines(np.array([p1, p2]), color='black')
+
+
+def linkCurvePair(cur1: dg.Curve, cur2: dg.Curve, t_range=(-1, 1), eps=None, params: dict = None, plotter=None):
+    if eps is None:
+        eps = (t_range[1] - t_range[0]) / 100
+    # substitute parameters
+    lst1 = list(cur1.x)
+    lst2 = list(cur2.x)
+    if params is not None:
+        for k in params.keys():
+            for i in range(len(lst1)):
+                lst1[i] = lst1[i].subs(k, params[k])
+                lst2[i] = lst2[i].subs(k, params[k])
+    # convert expressions to callables
+    x1f, y1f, z1f = [lambdify(cur1.t, f) for f in lst1]
+    x2f, y2f, z2f = [lambdify(cur2.t, f) for f in lst2]
+    # generate points
+    ts = arange(*t_range, eps)
+    X1, Y1, Z1, X2, Y2, Z2 = [f(ts) for f in (x1f, y1f, z1f, x2f, y2f, z2f)]
+    pos1 = np.vstack((X1, Y1, Z1)).T
+    pos2 = np.vstack((X2, Y2, Z2)).T
+    pairs = zip(pos1, pos2)
+    for p1, p2 in pairs:
+        _plotSegment(p1, p2, plotter)
+    return plotter
 
 
 def plotSurface(sur: dg.Surface, u_range=(-1, 1), v_range=(-1, 1), eps=None, params: dict = None, style: str = None):
