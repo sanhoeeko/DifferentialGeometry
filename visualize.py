@@ -14,42 +14,43 @@ def arange(start, end, step):
 def safe_vstack(lst: list):
     shape = None
     for obj in lst:
-        if hasattr(obj, 'shape'):
+        if hasattr(obj, 'shape') and len(obj.shape) != 0:
             shape = obj.shape
             break
     for i in range(len(lst)):
-        if not hasattr(lst[i], 'shape'):
+        if not hasattr(lst[i], 'shape') or len(lst[i].shape) == 0:
             lst[i] = np.ones(shape) * lst[i]
     return np.vstack(lst)
 
 
-def pvPlotTube(points, plotter=None):
+def pvPlotTube(points, plotter=None, **add_mesh_options):
     spline = pv.Spline(points, 1000)
     if plotter is None:
         plotter = pv.Plotter()
     plotter.add_mesh(
         spline,
+        **add_mesh_options,
         render_lines_as_tubes=True,
         line_width=10,
     )
     return plotter
 
 
-def _plotCurve(xfunc, yfunc, zfunc, t_range, eps, plotter=None):
+def _plotCurve(xfunc, yfunc, zfunc, t_range, eps, plotter=None, **add_mesh_options):
     """
     :param xfunc, yfunc, zfunc: Callable for vector
     :param t_range: list, like [t_start, t_end]
     """
-    ts = arange(*t_range, eps)
+    ts = arange(*t_range, eps)[:-1]  # for some functions, a small out of boundary will cause error
     xs = xfunc(ts)
     ys = yfunc(ts)
     zs = zfunc(ts)
     points = safe_vstack([xs, ys, zs]).T
-    plotter = pvPlotTube(points, plotter)
+    plotter = pvPlotTube(points, plotter, **add_mesh_options)
     return plotter
 
 
-def _plotSurface(xfunc, yfunc, zfunc, u_range, v_range, eps, plotter=None):
+def _plotSurface(xfunc, yfunc, zfunc, u_range, v_range, eps, plotter=None, **add_mesh_options):
     """
     :param xfunc, yfunc, zfunc: Callable f(u,v) for vector
     :param u_range, v_range: list, like [u_start, u_end]
@@ -63,7 +64,7 @@ def _plotSurface(xfunc, yfunc, zfunc, u_range, v_range, eps, plotter=None):
     ys = yfunc(U, V)
     zs = zfunc(U, V)
     grid = pv.StructuredGrid(xs, ys, zs)
-    plotter.add_mesh(grid)
+    plotter.add_mesh(grid, **add_mesh_options)
     return plotter
 
 
@@ -93,7 +94,7 @@ def _plotSurfaceColorfully(xfunc, yfunc, zfunc, color_func, u_range, v_range, ep
     return plotter
 
 
-def plotRawCurve(x: dg.Matrix, t, t_range=(-1, 1), eps=None, params: dict = None, plotter=None):
+def plotRawCurve(x: dg.Matrix, t, t_range=(-1, 1), eps=None, params: dict = None, plotter=None, **add_mesh_options):
     if eps is None:
         eps = (t_range[1] - t_range[0]) / 100
     # substitute parameters
@@ -106,14 +107,15 @@ def plotRawCurve(x: dg.Matrix, t, t_range=(-1, 1), eps=None, params: dict = None
     xf, yf, zf = [lambdify(t, f) for f in lst]
     # draw
     try:
-        plotter = _plotCurve(xf, yf, zf, t_range, eps, plotter=plotter)
+        plotter = _plotCurve(xf, yf, zf, t_range, eps, plotter=plotter, **add_mesh_options)
     except TypeError:
         print("plotCurve Error: You may forget to eliminate all free parameters in your expression.")
+        raise TypeError
     return plotter
 
 
-def plotCurve(curve: dg.Curve, t_range=(-1, 1), eps=None, params: dict = None, plotter=None):
-    return plotRawCurve(curve.x, curve.t, t_range, eps, params, plotter)
+def plotCurve(curve: dg.Curve, t_range=(-1, 1), eps=None, params: dict = None, plotter=None, **add_mesh_options):
+    return plotRawCurve(curve.x, curve.t, t_range, eps, params, plotter, **add_mesh_options)
 
 
 def _plotSegment(p1, p2, plotter):
@@ -173,9 +175,12 @@ def plotSurface(sur: dg.Surface, u_range=(-1, 1), v_range=(-1, 1), eps=None, par
                     for k in params.keys():
                         expr.subs(k, params[k])
                 cf = lambdify([sur.u, sur.v], expr)
-            return _plotSurfaceColorfully(xf, yf, zf, cf, u_range, v_range, eps, 'gaussian curvature')
+                return _plotSurfaceColorfully(xf, yf, zf, cf, u_range, v_range, eps, 'gaussian curvature')
+            elif style == 'background':
+                return _plotSurface(xf, yf, zf, u_range, v_range, eps, opacity=0.5)
     except TypeError:
         print("plotSurface Error: You may forget to eliminate all free parameters in your expression.")
+        raise TypeError
 
 
 def runge_kutta(f, x0, y0, h, n):

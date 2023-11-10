@@ -1,50 +1,4 @@
-import numpy as np
-from sympy import *
-
-_global_simplify_option = True
-
-
-def setSimplify(tf: bool):
-    """
-    If this program is too slow, probably it is problem of simplify.
-    Disable it will not cause big issue.
-    """
-    global _global_simplify_option
-    _global_simplify_option = tf
-
-
-def sqrSimplify(expr):
-    if not _global_simplify_option:
-        return expr
-
-    def _sqr_simplify(expr):
-        expr = simplify(expr)
-        p, rep = posify(simplify(expr * expr))
-        return sqrt(p).expand().subs(rep)
-
-    if expr.is_Matrix:
-        return expr.applyfunc(_sqr_simplify)
-    else:
-        return _sqr_simplify(expr)
-
-
-def normalize(vec):
-    if not _global_simplify_option:
-        return vec / norm(vec)
-    return simplify(simplify(vec) / norm(vec))
-
-
-def norm(vec):
-    return sqrSimplify(sqrt(vec.dot(vec)))
-
-
-def splitTensor(tensor: np.ndarray):
-    """
-    :param tensor: Array with 3 dims
-    :return: two sympy Matrices, split by the first dimension (k dimension of Christoffel symbol)
-    """
-    mat1, mat2 = tensor
-    return Matrix(mat1), Matrix(mat2)
+from dg_utils import *
 
 
 class Curve:
@@ -65,6 +19,38 @@ class Curve:
 
     def getCenterOfCurvature(self):
         return simplify(self.x + self.n / self.curvature)
+
+    def arc(self):
+        """
+        :return: the arc length parameter s
+        """
+        return integrate(norm(self.v), self.t)
+
+    def parameterize(self, t_as_func_of_s, s):
+        """
+        :param t_as_func_of_s: t(s)
+        """
+        return Curve(simplify(self.x.subs(self.t, t_as_func_of_s)), s)
+
+    def arc_length_parameterize(self, s_name):
+        s_t = self.arc()
+        t_s = solve(s_t - s_name, self.t)  # derive the inverse function of the arc length
+        return self.parameterize(t_s[0], s_name)
+
+    def rotate(self, option: str, angle) -> Curve:
+        """
+        :params option: string, 'x', 'y' or 'z'.
+        """
+        option = option.lower()
+        if option == 'x':
+            mat = RotationMatrixX(angle)
+        elif option == 'y':
+            mat = RotationMatrixY(angle)
+        elif option == 'z':
+            mat = RotationMatrixZ(angle)
+        else:
+            raise ValueError
+        return Curve(simplify(mat @ self.x), self.t)
 
 
 class Surface:
@@ -88,6 +74,7 @@ class Surface:
         self.highG = np.array(self.I.inv())
         self.lowerGamma = self.getChristoffel()
         self.Gamma = simplify(np.einsum('kl,lij->kij', self.highG, self.lowerGamma))
+        self.lowerGamma = simplify(self.lowerGamma)
         self.has_principal = False
 
     def principal(self):
@@ -115,6 +102,12 @@ class Surface:
 
     def v_curve(self, v0):
         return self.x.subs(self.v, v0)
+
+    def on_curve(self, u_t, v_t):
+        return simplify(self.x.subs(self.u, u_t).subs(self.v, v_t))
+
+    def on_curve_u_by_v(self, u_v):
+        return simplify(self.x.subs(self.u, u_v))
 
     def get_first_fundamental(self):
         lst = [self.xu.dot(self.xu), self.xu.dot(self.xv), self.xv.dot(self.xu), self.xv.dot(self.xv)]
