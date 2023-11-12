@@ -4,13 +4,27 @@ from sympy import *
 _global_simplify_option = True
 
 
-def setSimplify(tf: bool):
+def setSimplify(tf):
     """
     If this program is too slow, probably it is problem of simplify.
     Disable it will not cause big issue.
+    :param tf: True: enable simplify. False: disable simplify. 'positive': enable simplify, and discard Abs and sign.
     """
     global _global_simplify_option
     _global_simplify_option = tf
+
+
+def Simplify(expr):
+    if not _global_simplify_option:
+        return expr
+    else:
+        if _global_simplify_option == 'positive':
+            expr = simplify(expr)
+            expr = expr.replace(Abs, lambda x: x)
+            expr = expr.replace(sign, lambda x: 1)
+            return simplify(expr)
+        else:
+            return simplify(expr)
 
 
 def sqrSimplify(expr):
@@ -18,7 +32,7 @@ def sqrSimplify(expr):
         return expr
 
     def _sqr_simplify(expr):
-        expr = simplify(expr)
+        expr = Simplify(expr)
         p, rep = posify(simplify(expr * expr))
         return sqrt(p).expand().subs(rep)
 
@@ -31,11 +45,15 @@ def sqrSimplify(expr):
 def normalize(vec):
     if not _global_simplify_option:
         return vec / norm(vec)
-    return simplify(simplify(vec) / norm(vec))
+    return Simplify(Simplify(vec) / norm(vec))
 
 
 def norm(vec):
     return sqrSimplify(sqrt(vec.dot(vec)))
+
+
+def var(varname: str):
+    return symbols(varname, positive=True)
 
 
 def splitTensor(tensor: np.ndarray):

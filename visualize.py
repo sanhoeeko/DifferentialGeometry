@@ -1,4 +1,5 @@
 import math as mh
+from typing import Union
 
 import numpy as np
 import pyvista as pv
@@ -68,7 +69,8 @@ def _plotSurface(xfunc, yfunc, zfunc, u_range, v_range, eps, plotter=None, **add
     return plotter
 
 
-def _plotSurfaceColorfully(xfunc, yfunc, zfunc, color_func, u_range, v_range, eps, color_meaning, plotter=None):
+def _plotSurfaceColorfully(xfunc, yfunc, zfunc, color_func, u_range, v_range, eps, color_meaning, plotter=None,
+                           **add_mesh_options):
     """
     :param xfunc, yfunc, zfunc: Callable f(u,v) for vector
     :param u_range, v_range: list, like [u_start, u_end]
@@ -90,7 +92,7 @@ def _plotSurfaceColorfully(xfunc, yfunc, zfunc, color_func, u_range, v_range, ep
     grid = pv.StructuredGrid(xs, ys, zs)
     # draw
     grid[color_meaning] = color
-    plotter.add_mesh(grid, scalars=color_meaning, cmap="jet")
+    plotter.add_mesh(grid, scalars=color_meaning, cmap="jet", **add_mesh_options)
     return plotter
 
 
@@ -114,7 +116,8 @@ def plotRawCurve(x: dg.Matrix, t, t_range=(-1, 1), eps=None, params: dict = None
     return plotter
 
 
-def plotCurve(curve: dg.Curve, t_range=(-1, 1), eps=None, params: dict = None, plotter=None, **add_mesh_options):
+def plotCurve(curve: Union[dg.Curve, dg.ConfinedCurve], t_range=(-1, 1), eps=None, params: dict = None, plotter=None,
+              **add_mesh_options):
     return plotRawCurve(curve.x, curve.t, t_range, eps, params, plotter, **add_mesh_options)
 
 
@@ -147,37 +150,49 @@ def linkCurvePair(cur1: dg.Curve, cur2: dg.Curve, t_range=(-1, 1), eps=None, par
     return plotter
 
 
-def plotSurface(sur: dg.Surface, u_range=(-1, 1), v_range=(-1, 1), eps=None, params: dict = None, style: str = None):
+def plotSurface(sur: dg.Surface, u_range=(-1, 1), v_range=(-1, 1), eps=None,
+                plotter=None, params: dict = None, style: str = None, **add_mesh_options):
     """
     :param params: substitute free parameters
     :param style: None|gauss(show gaussian curvature)
     """
+    if style == 'gauss':
+        return plotRawSurface(sur.x, sur.u, sur.v, u_range, v_range, eps,
+                              plotter, params, style, gaussian_curvature=sur.K, **add_mesh_options)
+    else:
+        return plotRawSurface(sur.x, sur.u, sur.v, u_range, v_range, eps,
+                              plotter, params, style, gaussian_curvature=None, **add_mesh_options)
+
+
+def plotRawSurface(x_expr, u_expr, v_expr, u_range=(-1, 1), v_range=(-1, 1), eps=None,
+                   plotter=None, params: dict = None, style: str = None, gaussian_curvature=None, **add_mesh_options):
     if eps is None:
         ulen = u_range[1] - u_range[0]
         vlen = v_range[1] - v_range[0]
         eps = mh.sqrt(ulen * vlen / 6400)
     # substitute parameters
-    lst = list(sur.x)
+    lst = list(x_expr)
     if params is not None:
         for k in params.keys():
             for i in range(len(lst)):
                 lst[i] = lst[i].subs(k, params[k])
     # convert expressions to callables
-    xf, yf, zf = [lambdify([sur.u, sur.v], f, modules='numpy') for f in lst]
+    xf, yf, zf = [lambdify([u_expr, v_expr], f, modules='numpy') for f in lst]
     # draw
     try:
         if style is None:
-            return _plotSurface(xf, yf, zf, u_range, v_range, eps)
+            return _plotSurface(xf, yf, zf, u_range, v_range, eps, plotter, **add_mesh_options)
         else:
             if style == 'gauss':
-                expr = sur.K
+                expr = gaussian_curvature
                 if params is not None:
                     for k in params.keys():
                         expr.subs(k, params[k])
-                cf = lambdify([sur.u, sur.v], expr)
-                return _plotSurfaceColorfully(xf, yf, zf, cf, u_range, v_range, eps, 'gaussian curvature')
+                cf = lambdify([u_expr, v_expr], expr)
+                return _plotSurfaceColorfully(xf, yf, zf, cf, u_range, v_range, eps,
+                                              plotter=plotter, color_meaning='gaussian curvature', **add_mesh_options)
             elif style == 'background':
-                return _plotSurface(xf, yf, zf, u_range, v_range, eps, opacity=0.5)
+                return _plotSurface(xf, yf, zf, u_range, v_range, eps, plotter, opacity=0.5, **add_mesh_options)
     except TypeError:
         print("plotSurface Error: You may forget to eliminate all free parameters in your expression.")
         raise TypeError
@@ -273,26 +288,28 @@ def integralPlotGrid(sur: dg.Surface, diff_func, u_range, v_range, sample=5, plo
     return plotter
 
 
-def plotLineOfCurvature(sur: dg.Surface, u_range, v_range, sample=5):
+def plotLineOfCurvature(sur: dg.Surface, u_range, v_range, sample=5, plotter=None):
     def stretch(interval: list, rate):
         x = np.array(interval)
         center = (x[0] + x[1]) / 2
         return center + (x - center) * rate
 
     f1, f2 = sur.getLineOfCurvatureODE()
-    plotter = plotSurface(sur, stretch(u_range, 2), stretch(v_range, 2))
+    if plotter is None:
+        plotter = plotSurface(sur, stretch(u_range, 2), stretch(v_range, 2))
     plotter = integralPlotGrid(sur, f1, u_range, v_range, sample, color_str='red', plotter=plotter)
     plotter = integralPlotGrid(sur, f2, u_range, v_range, sample, color_str='blue', plotter=plotter)
     return plotter
 
 
-def plotAsymptote(sur: dg.Surface, u_range, v_range, sample=5):
+def plotAsymptote(sur: dg.Surface, u_range, v_range, sample=5, plotter=None):
     def stretch(interval: list, rate):
         x = np.array(interval)
         center = (x[0] + x[1]) / 2
         return center + (x - center) * rate
 
-    plotter = plotSurface(sur, stretch(u_range, 2), stretch(v_range, 2))
+    if plotter is None:
+        plotter = plotSurface(sur, stretch(u_range, 2), stretch(v_range, 2))
     lst = sur.getAsymptoteODE()
 
     if len(lst) == 2:
@@ -306,8 +323,9 @@ def plotAsymptote(sur: dg.Surface, u_range, v_range, sample=5):
     return plotter
 
 
-def plotUVCurve(sur: dg.Surface, u_range, v_range, sample=5):
-    plotter = plotSurface(sur, u_range, v_range)
+def plotUVCurve(sur: dg.Surface, u_range, v_range, sample=5, plotter=None):
+    if plotter is None:
+        plotter = plotSurface(sur, u_range, v_range)
     plotter = _plotUVGrid(sur, 'u', u_range, v_range, sample, color_str='red', plotter=plotter)
     plotter = _plotUVGrid(sur, 'v', u_range, v_range, sample, color_str='blue', plotter=plotter)
     return plotter

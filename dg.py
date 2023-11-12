@@ -15,10 +15,10 @@ class Curve:
         self.n = normalize(self.v.cross(self.a).cross(self.v))  # normal vector
         self.curvature = sqrSimplify(norm(self.v.cross(self.a)) / norm(self.v) ** 3)
         self.b = normalize(self.v.cross(self.a))  # binormal vector
-        self.torsion = simplify((diff(self.n, self.t) / norm(self.v)).dot(self.b))
+        self.torsion = Simplify((diff(self.n, self.t) / norm(self.v)).dot(self.b))
 
     def getCenterOfCurvature(self):
-        return simplify(self.x + self.n / self.curvature)
+        return Simplify(self.x + self.n / self.curvature)
 
     def arc(self):
         """
@@ -30,7 +30,7 @@ class Curve:
         """
         :param t_as_func_of_s: t(s)
         """
-        return Curve(simplify(self.x.subs(self.t, t_as_func_of_s)), s)
+        return Curve(Simplify(self.x.subs(self.t, t_as_func_of_s)), s)
 
     def arc_length_parameterize(self, s_name):
         s_t = self.arc()
@@ -50,7 +50,10 @@ class Curve:
             mat = RotationMatrixZ(angle)
         else:
             raise ValueError
-        return Curve(simplify(mat @ self.x), self.t)
+        return Curve(Simplify(mat @ self.x), self.t)
+
+    def tangent_surface(self, u, v):
+        return RuledSurface(self.x.subs(self.t, u), self.tg.subs(self.t, u), u, v)
 
 
 class Surface:
@@ -62,20 +65,29 @@ class Surface:
         self.x = Matrix(func_array)
         self.u = variables[0]
         self.v = variables[1]
-        self.xu = diff(self.x, self.u)
-        self.xv = diff(self.x, self.v)
+        self.xu = Simplify(diff(self.x, self.u))
+        self.xv = Simplify(diff(self.x, self.v))
         self.n = normalize(self.xu.cross(self.xv))
         self.I = self.get_first_fundamental()
         self.II = self.get_second_fundamental()
-        self.weingarten = self.II @ self.I.inv()
-        self.g = simplify(det(self.I))
-        self.K = simplify(det(self.weingarten))  # gaussian curvature
+        self.g = Simplify(det(self.I))
+        self.K = Simplify(det(self.II) / det(self.I))  # gaussian curvature
         self.lowerG = np.array(self.I)  # the metric tensor is implemented with numpy!
-        self.highG = np.array(self.I.inv())
-        self.lowerGamma = self.getChristoffel()
-        self.Gamma = simplify(np.einsum('kl,lij->kij', self.highG, self.lowerGamma))
-        self.lowerGamma = simplify(self.lowerGamma)
+        self.lowerGamma = Simplify(self.getChristoffel())
         self.has_principal = False
+        self.has_weingarten = False
+
+    def get_weingarten(self):
+        """
+        Although simplify can be skipped, inverse matrix may be a bottleneck.
+        So calculate inverse matrix only if you need it.
+        """
+        if not self.has_weingarten:
+            g_inv = self.I.inv()
+            self.weingarten = self.II @ g_inv
+            self.H = Simplify(trace(self.weingarten) / 2)  # mean curvature
+            self.upperG = np.array(g_inv)
+            self.Gamma = Simplify(np.einsum('kl,lij->kij', self.upperG, self.lowerGamma))
 
     def principal(self):
         """
@@ -83,6 +95,8 @@ class Surface:
         This process is too slow, so call it only when you trust the answer exists.
         """
         if not self.has_principal:
+            if not self.has_weingarten:
+                self.get_weingarten()
             self.principalCurvature, self.principalDirection = self.get_eigen_system()
             self.k1, self.k2 = self.principalCurvature
             self.vk1, self.vk2 = self.principalDirection
@@ -93,9 +107,15 @@ class Surface:
         :param uv_prime: substitute u by u_prime(s,t), v by v_prime(s,t), where new_u=s, new_v=t
         """
         return Surface(
-            simplify(self.x.subs(self.u, uv_prime[0]).subs(self.v, uv_prime[1])),
+            Simplify(self.x.subs(self.u, uv_prime[0]).subs(self.v, uv_prime[1])),
             new_u, new_v
         )
+
+    def Xu(self, u, v):
+        return self.xu.subs(self.u, u).subs(self.v, v)
+
+    def Xv(self, u, v):
+        return self.xv.subs(self.u, u).subs(self.v, v)
 
     def u_curve(self, u0):
         return self.x.subs(self.u, u0)
@@ -104,19 +124,31 @@ class Surface:
         return self.x.subs(self.v, v0)
 
     def on_curve(self, u_t, v_t):
-        return simplify(self.x.subs(self.u, u_t).subs(self.v, v_t))
+        return Simplify(self.x.subs(self.u, u_t).subs(self.v, v_t))
 
-    def on_curve_u_by_v(self, u_v):
-        return simplify(self.x.subs(self.u, u_v))
+    def addConfinedCurve(self, u_t, v_t, t):
+        return ConfinedCurve(self, u_t, v_t, t)
+
+    def on_curve_u_by_v(self, u_v, v=None):
+        if v is None:
+            return Simplify(self.x.subs(self.u, u_v))
+        else:
+            return Simplify(self.x.subs(self.u, u_v)).subs(self.v, v)
+
+    def on_curve_v_by_u(self, v_u, u=None):
+        if u is None:
+            return Simplify(self.x.subs(self.v, v_u))
+        else:
+            return Simplify(self.x.subs(self.v, v_u)).subs(self.u, u)
 
     def get_first_fundamental(self):
         lst = [self.xu.dot(self.xu), self.xu.dot(self.xv), self.xv.dot(self.xu), self.xv.dot(self.xv)]
-        return simplify(Matrix(lst).reshape(2, 2))
+        return Simplify(Matrix(lst).reshape(2, 2))
 
     def get_second_fundamental(self):
         lst = [diff(self.x, self.u, self.u), diff(self.x, self.u, self.v),
                diff(self.x, self.v, self.u), diff(self.x, self.v, self.v)]
-        lst = [simplify(y.dot(self.n)) for y in lst]
+        lst = [Simplify(y.dot(self.n)) for y in lst]
         return Matrix(lst).reshape(2, 2)
 
     def get_eigen_system(self):
@@ -132,8 +164,8 @@ class Surface:
         lst = [diff(self.x, self.u, self.u), diff(self.x, self.u, self.v),
                diff(self.x, self.v, self.u), diff(self.x, self.v, self.v)]
         ri = [diff(self.x, self.u), diff(self.x, self.v)]
-        ij_k1 = np.array([simplify(y.dot(ri[0])) for y in lst]).reshape((2, 2))
-        ij_k2 = np.array([simplify(y.dot(ri[1])) for y in lst]).reshape((2, 2))
+        ij_k1 = np.array([Simplify(y.dot(ri[0])) for y in lst]).reshape((2, 2))
+        ij_k2 = np.array([Simplify(y.dot(ri[1])) for y in lst]).reshape((2, 2))
         return np.array([ij_k1, ij_k2])
 
     def getLineOfCurvatureODE(self):
@@ -146,14 +178,14 @@ class Surface:
         c = self.weingarten[1, 0]
         d = self.weingarten[1, 1]
         if c == 0:
-            du_dv_of_k1 = simplify(b / (d - a))
-            du_dv_of_k2 = simplify(b / (d - a))
+            du_dv_of_k1 = Simplify(b / (d - a))
+            du_dv_of_k2 = Simplify(b / (d - a))
         else:
-            a_d = simplify(a - d)
-            delta = simplify(a_d ** 2 + 4 * b * c)
+            a_d = Simplify(a - d)
+            delta = Simplify(a_d ** 2 + 4 * b * c)
             # note that sqrSimplify is regardless of + and - !
-            du_dv_of_k1 = simplify(a_d / (2 * c) + sqrSimplify(sqrt(delta) / (2 * c)))
-            du_dv_of_k2 = simplify(a_d / (2 * c) - sqrSimplify(sqrt(delta) / (2 * c)))
+            du_dv_of_k1 = Simplify(a_d / (2 * c) + sqrSimplify(sqrt(delta) / (2 * c)))
+            du_dv_of_k2 = Simplify(a_d / (2 * c) - sqrSimplify(sqrt(delta) / (2 * c)))
         return du_dv_of_k1, du_dv_of_k2
 
     def getAsymptoteODE(self):
@@ -165,8 +197,49 @@ class Surface:
         if L == 0:
             # if L is zero, another asymptote is dv = 0 i.e. v curve
             N = self.II[1, 1]
-            return [simplify(-N / (2 * M))]
+            return [Simplify(-N / (2 * M))]
         sqr_det = sqrSimplify(det(self.II))
-        du_dv_1 = simplify((-M + sqr_det) / L)
-        du_dv_2 = simplify((-M - sqr_det) / L)
+        du_dv_1 = Simplify((-M + sqr_det) / L)
+        du_dv_2 = Simplify((-M - sqr_det) / L)
         return [du_dv_1, du_dv_2]
+
+
+class RuledSurface(Surface):
+    def __init__(self, directrix, generatrix, u, v, complicated=True):
+        """
+        :param directrix: a(u), also called director curve, is the movement of the generatrices.
+        :param generatrix: b(u), the direction vectors of straight lines called generatrices.
+        :param u: the expression of the ruled surface is: r(u,v) = a(u) + v * b(u)
+        """
+        self.a_u = Matrix(directrix)
+        self.b_u = Matrix(generatrix)
+        self.x = self.a_u + v * self.b_u
+        self.u = u
+        self.v = v
+        if not complicated:
+            super(RuledSurface, self).__init__(self.x, self.u, self.v)
+
+    def director_curve(self, t) -> Curve:
+        return Curve(self.a_u.subs(self.u, t), t)
+
+
+class ConfinedCurve:
+    def __init__(self, surface: Surface, u_t, v_t, t):
+        self.u_t = u_t
+        self.v_t = v_t
+        self.t = t
+        self.surface = surface
+        self.x = self.surface.on_curve(self.u_t, self.v_t)
+        self.dudt = diff(self.u_t, self.t)
+        self.dvdt = diff(self.v_t, self.t)
+        self.V = Simplify(self.surface.Xu(u_t, v_t) * self.dudt + self.surface.Xv(u_t, v_t) * self.dvdt)  # velocity
+        self.T = normalize(self.V)  # the tangent vector of the frame is the tangent vector of the curve
+        self.N = self.surface.n.subs(self.surface.u, u_t).subs(self.surface.v, v_t)
+        # the normal vector of the frame is the normal vector of the surface
+        self.B = Simplify(self.T.cross(self.N))
+
+    def toCurve(self) -> Curve:
+        return Curve(self.x, self.t)
+
+    def toRuledSurface(self, u, v) -> RuledSurface:
+        return RuledSurface(self.x.subs(self.t, u), self.B.subs(self.t, u), u, v)
