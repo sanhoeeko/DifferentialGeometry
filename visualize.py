@@ -84,7 +84,7 @@ def _plotSurfaceColorfully(xfunc, yfunc, zfunc, color_func, u_range, v_range, ep
     ys = yfunc(U, V)
     zs = zfunc(U, V)
     # generate color
-    color = color_func(U, V)
+    color = color_func(V, U)  # I don't know why there should be a patch
     # if the value is unfortunately a constant
     if not hasattr(color, 'shape'):
         color = np.ones(U.shape) * color
@@ -237,7 +237,7 @@ def integral_curve(diff_func, x0, y0, t_range):
     return x, y
 
 
-def _plotUVGrid(sur: dg.Surface, u_or_v, u_range, v_range, sample=5, plotter=None, color_str='black'):
+def _plotUVGrid(sur: dg.Surface, u_or_v, u_range=(-1, 1), v_range=(-1, 1), sample=5, plotter=None, color_str='black'):
     """
     :param u_or_v: String, only 'u' or 'v'
     """
@@ -266,7 +266,7 @@ def _plotUVGrid(sur: dg.Surface, u_or_v, u_range, v_range, sample=5, plotter=Non
     return plotter
 
 
-def integralPlotGrid(sur: dg.Surface, diff_func, u_range, v_range, sample=5, plotter=None, color_str='black'):
+def integralPlotGrid(sur: dg.Surface, diff_func,  u_range=(-1, 1), v_range=(-1, 1), sample=5, plotter=None, color_str='black'):
     """
     :param diff_func: Sympy expression, f in dv/du = f(u,v)
     """
@@ -288,7 +288,7 @@ def integralPlotGrid(sur: dg.Surface, diff_func, u_range, v_range, sample=5, plo
     return plotter
 
 
-def plotLineOfCurvature(sur: dg.Surface, u_range, v_range, sample=5, plotter=None):
+def plotLineOfCurvature(sur: dg.Surface,  u_range=(-1, 1), v_range=(-1, 1), sample=5, plotter=None):
     def stretch(interval: list, rate):
         x = np.array(interval)
         center = (x[0] + x[1]) / 2
@@ -302,7 +302,7 @@ def plotLineOfCurvature(sur: dg.Surface, u_range, v_range, sample=5, plotter=Non
     return plotter
 
 
-def plotAsymptote(sur: dg.Surface, u_range, v_range, sample=5, plotter=None):
+def plotAsymptote(sur: dg.Surface,  u_range=(-1, 1), v_range=(-1, 1), sample=5, plotter=None):
     def stretch(interval: list, rate):
         x = np.array(interval)
         center = (x[0] + x[1]) / 2
@@ -323,9 +323,40 @@ def plotAsymptote(sur: dg.Surface, u_range, v_range, sample=5, plotter=None):
     return plotter
 
 
-def plotUVCurve(sur: dg.Surface, u_range, v_range, sample=5, plotter=None):
+def plotUVCurve(sur: dg.Surface,  u_range=(-1, 1), v_range=(-1, 1), sample=5, plotter=None):
     if plotter is None:
         plotter = plotSurface(sur, u_range, v_range)
     plotter = _plotUVGrid(sur, 'u', u_range, v_range, sample, color_str='red', plotter=plotter)
     plotter = _plotUVGrid(sur, 'v', u_range, v_range, sample, color_str='blue', plotter=plotter)
     return plotter
+
+
+def plotVectorField(sur: dg.Surface, vector_field: dg.Matrix,  u_range=(-1, 1), v_range=(-1, 1), sample=5, plotter=None,
+                    **add_mesh_options):
+    if plotter is None:
+        plotter = plotSurface(sur, u_range, v_range)
+    u0s = np.linspace(*u_range, sample)
+    v0s = np.linspace(*v_range, sample)
+    X, Y = vector_field
+    X = lambdify([sur.u, sur.v], X)
+    Y = lambdify([sur.u, sur.v], Y)
+    xfunc, yfunc, zfunc = sur.x
+    xfunc = lambdify([sur.u, sur.v], xfunc)
+    yfunc = lambdify([sur.u, sur.v], yfunc)
+    zfunc = lambdify([sur.u, sur.v], zfunc)
+    U, V = np.meshgrid(u0s, v0s)
+    # calculate
+    Xs = X(U, V)
+    Ys = Y(U, V)
+    x = xfunc(U, V)
+    y = yfunc(U, V)
+    z = zfunc(U, V)
+    tangent_spaces = sur.tangentMatrixFunction()(U,V)
+
+    # plot
+    vectors = pv.PolyData(x, y, z)
+    #vectors['vectors'] = np.c_[u, v, w]
+    arrows = vectors.glyph(orient='vectors', scale=False, factor=0.1)
+    plotter.add_mesh(arrows, color='r')
+    plotter.show_grid()
+    plotter.show()

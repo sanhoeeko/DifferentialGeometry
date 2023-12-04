@@ -70,8 +70,8 @@ class Surface:
         self.n = normalize(self.xu.cross(self.xv))
         self.I = self.get_first_fundamental()
         self.II = self.get_second_fundamental()
-        self.g = Simplify(det(self.I))
-        self.K = Simplify(det(self.II) / det(self.I))  # gaussian curvature
+        self.g = Simplify(det2(self.I))
+        self.K = Simplify(det2(self.II) / det2(self.I))  # gaussian curvature
         self.lowerG = np.array(self.I)  # the metric tensor is implemented with numpy!
         self.lowerGamma = Simplify(self.getChristoffel())
         self.has_principal = False
@@ -83,7 +83,7 @@ class Surface:
         So calculate inverse matrix only if you need it.
         """
         if not self.has_weingarten:
-            g_inv = self.I.inv()
+            g_inv = Simplify(inv2(self.I))
             self.weingarten = self.II @ g_inv
             self.H = Simplify(trace(self.weingarten) / 2)  # mean curvature
             self.upperG = np.array(g_inv)
@@ -116,6 +116,21 @@ class Surface:
 
     def Xv(self, u, v):
         return self.xv.subs(self.u, u).subs(self.v, v)
+
+    def tangentMatrixFunction(self):
+        mat = []
+        for term in self.xu:
+            mat.append(lambdify([self.u, self.v], term))
+        for term in self.xv:
+            mat.append(lambdify([self.u, self.v], term))
+
+        def func(u, v):
+            lst = [f(u, v) for f in mat]
+            shape = lst[0].shape
+            res = np.stack(lst, np.newaxis)  # the stack is not safe
+            return res.reshape((2, 3, *shape))
+
+        return func
 
     def u_curve(self, u0):
         return self.x.subs(self.u, u0)
@@ -152,9 +167,10 @@ class Surface:
         return Matrix(lst).reshape(2, 2)
 
     def get_eigen_system(self):
-        eigsys = self.weingarten.eigenvects()
-        eig = [eigsys[0][0], eigsys[1][0]]
-        vec = [eigsys[0][2], eigsys[1][2]]
+        eigsys = eigsys2(self.weingarten)
+        eig = eigsys[0]
+        vecs = eigsys[1]
+        vec = [vecs[:, 0], vecs[:, 1]]
         return eig, vec
 
     def getChristoffel(self):
@@ -202,6 +218,40 @@ class Surface:
         du_dv_1 = Simplify((-M + sqr_det) / L)
         du_dv_2 = Simplify((-M - sqr_det) / L)
         return [du_dv_1, du_dv_2]
+
+    def covariantDerivative(self, vector_field, sgn):
+        """
+        :param vector_field: list or np.ndarray (not sy.Matrix). Make sure that it has correct u, v for variables.
+        :param sgn: 1 for contravariant vectors (upper index), and -1 for covariant vectors (lower index).
+        :return: 2x2 Matrix
+        """
+        f = vector_field
+        ordinary_derivative = []
+        for fj in f:
+            ordinary_derivative.append([diff(fj, self.u), diff(fj, self.v)])
+        self.get_weingarten()
+        appendix = np.einsum('kij,k->ij', self.Gamma, np.asarray(f))
+        return Simplify(Matrix(ordinary_derivative) + sgn * Matrix(appendix))
+
+    def getKillingODEs(self):
+        killing_components_u = symbols(fr'\zeta_{str(self.u)}', cls=Function)(self.u, self.v)
+        killing_components_v = symbols(fr'\zeta_{str(self.v)}', cls=Function)(self.u, self.v)
+        killing_vector = [killing_components_u, killing_components_v]
+        mat = self.covariantDerivative(killing_vector, sgn=-1)
+        res = Simplify(mat + mat.T)
+        # extract upper triangular components
+        lst = [res[0, 0], res[1, 1], res[0, 1]]
+        return lst
+
+    def getOrthogonalFrame(self):
+        """
+        return a unit orthogonal frame, whose z-axis is the normal vector,
+        x-axis is the normalized Xu vector.
+        """
+        z_vec = self.n
+        x_vec = normalize(self.xu)
+        y_vec = Simplify(z_vec.cross(x_vec))
+        return Matrix([x_vec.T, y_vec.T, z_vec.T]).T
 
 
 class RuledSurface(Surface):

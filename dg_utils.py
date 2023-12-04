@@ -52,6 +52,30 @@ def norm(vec):
     return sqrSimplify(sqrt(vec.dot(vec)))
 
 
+def det2(mat):
+    return mat[0, 0] * mat[1, 1] - mat[0, 1] * mat[1, 0]
+
+
+def inv2(mat):
+    return Matrix([[mat[1, 1], -mat[0, 1]], [-mat[1, 0], mat[0, 0]]]) / det2(mat)
+
+
+def eigsys2(mat):
+    a = mat[0, 0]
+    b = mat[0, 1]
+    c = mat[1, 0]
+    d = mat[1, 1]
+    delta = Simplify((a - d) ** 2 + 4 * b * c)
+    trace = a + d
+    sq = sqrSimplify(sqrt(delta))
+    j1 = (trace - sq) / 2
+    j2 = (trace + sq) / 2
+    s11 = (j1 - d) / c
+    s12 = (j2 - d) / c
+    eigvects = Matrix([[s11, s12], [1, 1]])
+    return (j1, j2), eigvects
+
+
 def var(varname: str):
     return symbols(varname, positive=True)
 
@@ -63,6 +87,13 @@ def splitTensor(tensor: np.ndarray):
     """
     mat1, mat2 = tensor
     return Matrix(mat1), Matrix(mat2)
+
+
+def Lambdify(expr):
+    """
+    A safe lambdify. It preserves input shape even when the function returns a constant.
+    """
+    pass
 
 
 def RotationMatrixX(th):
